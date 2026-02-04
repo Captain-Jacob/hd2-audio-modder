@@ -54,6 +54,9 @@ from graph import *
 from slim import slim_init
 from log import logger
 
+#updated by pito
+import sys
+
 WINDOW_WIDTH = 1480
 WINDOW_HEIGHT = 848
 VERSION = "1.19.2"
@@ -408,7 +411,25 @@ class OptionsWindow:
         
         self.config_frame.pack(anchor="n", expand=True, fill='x')
         self.button_frame.pack(side="bottom", anchor="se")
-        
+    
+    # updated by pito
+        self.entry_info_panel = Frame(self.window, width=int(WINDOW_WIDTH/3))
+        self.entry_info_panel.pack(side="left", fill="both", padx=8, pady=8)
+
+        self.audio_info_panel = AudioSourceWindow(self.entry_info_panel, self.play_audio, self.check_modified)
+        self.event_info_panel = EventWindow(self.entry_info_panel, self.check_modified)
+        self.string_info_panel = StringEntryWindow(self.entry_info_panel, self.check_modified)
+
+        # updated by pito
+        self.textbank_info_panel = TextBanksWindow(
+            self.entry_info_panel,
+            self.mod_handler,
+            self.check_modified
+        )
+    #end updated by pito
+
+
+
     def rowheight_slider_changed(self, event):
         new_value = self.rowheight_scale_var.get()
         new_value = round(round(new_value / self.slider_increment) * self.slider_increment, 2)
@@ -601,7 +622,90 @@ class StringEntryWindow:
             self.text_box.delete("1.0", END)
             self.text_box.insert(END, self.string_entry.get_text())
             self.update_modified(diff=[self.string_entry])
-            
+
+#updated by pito
+class TextBanksWindow:
+    def __init__(self, parent, mod_handler, on_modified_refresh):
+        self.mod_handler = mod_handler
+        self.on_modified_refresh = on_modified_refresh
+
+        self.frame = Frame(parent)
+
+        self.title = ttk.Label(self.frame, text="Text Banks", font=('Segoe UI', 12))
+        self.export_btn = ttk.Button(self.frame, text="Export ALL TextBanks (JSON)", command=self.export_all)
+        self.import_btn = ttk.Button(self.frame, text="Import ALL TextBanks (JSON)", command=self.import_all)
+
+        self.title.pack(anchor="w", pady=(0, 6))
+        self.export_btn.pack(anchor="w", pady=2)
+        self.import_btn.pack(anchor="w", pady=2)
+
+        self.status = ttk.Label(self.frame, text="")
+        self.status.pack(anchor="w", pady=(6, 0))
+
+    def set_text_bank(self, textbank_id: int):
+        self.current_textbank_id = textbank_id
+
+    def export_all(self):
+        out_dir = filedialog.askdirectory(title="Select folder to export JSON files into")
+        if not out_dir:
+            return
+
+        out_path, count = self.mod_handler.get_active_mod().export_all_textbanks_json(out_dir)
+        self.status.configure(text=f"Exported {count} textbanks into: {out_path}")
+
+    def import_all(self):
+        in_dir = filedialog.askdirectory(title="Select folder that contains exported JSON files")
+        if not in_dir:
+            return
+
+        banks_processed, total_replaced, missing_banks = self.mod_handler.get_active_mod().import_all_textbanks_json(in_dir)
+
+        # refresh modified tags (strings / banks) after import
+        try:
+            self.on_modified_refresh()
+        except:
+            pass
+
+        self.status.configure(
+            text=f"Imported {banks_processed} banks | Replaced {total_replaced} strings | Missing {missing_banks} banks"
+        )
+
+    def export_json(self, out_file: str) -> None:
+        data = {
+            "textbank_id": self.get_id(),
+            "language": getattr(self, "language", None),
+            "entries": {str(k): v.get_text() for k, v in self.entries.items()}
+        }
+        with open(out_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+    def import_json(self, in_file: str) -> tuple[int, int]:
+        """
+        Returns: (replaced_count, missing_count)
+        """
+        with open(in_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        entries = data.get("entries", {})
+        replaced = 0
+        missing = 0
+
+        for k_str, new_text in entries.items():
+            try:
+                k = int(k_str)
+            except:
+                continue
+
+            if k in self.entries:
+                self.entries[k].set_text(new_text)
+                replaced += 1
+            else:
+                missing += 1
+
+        return replaced, missing
+
+# updated by pito
+
 class MusicTrackWindow:
     
     def __init__(self, parent, update_modified, play):
@@ -1792,6 +1896,9 @@ class MainWindow:
                                             self.check_modified)
         self.string_info_panel = StringEntryWindow(self.entry_info_panel,
                                                    self.check_modified)
+        #updated by pito
+        self.textbank_info_panel = TextBanksWindow(self.entry_info_panel, self.mod_handler, self.check_modified)
+        #end updated by pito
         self.segment_info_panel = MusicSegmentWindow(self.entry_info_panel,
                                                      self.check_modified)
                                                      
@@ -1986,6 +2093,19 @@ class MainWindow:
         github_link.image = github_image
         github_link.pack(side="left", padx=10)
         github_link.bind("<Button-1>", lambda event: webbrowser.open_new("https://github.com/raidingforpants"))
+        
+    # we ball by pito
+        self.string_info_panel = StringEntryWindow(self.entry_info_panel, self.check_modified)
+
+    # updated by pito
+        self.textbank_info_panel = TextBanksWindow(
+            self.entry_info_panel,
+            self.mod_handler,
+            self.check_modified
+    )
+    # end updated by pito
+
+
 
         
     def check_unsaved(self, message: str):
@@ -2451,10 +2571,74 @@ class MainWindow:
                     inode_stack.append(node)
                     id_stack.append(id)
                     
-        # I'm too lazy so I'm just going to unschedule and then reschedule all the watches
+        # I'm too lazy so I'm just going to unschedule and then reschedule all the watches 
+        #/pito: wow, such a lazy person.
         # instead of locating all subfolders and then figuring out which ones to not schedule
         self.reload_watched_paths()
-            
+    #updated by pito
+    def export_textbank_json(self, textbank_id: int):
+        tb = self.mod_handler.get_active_mod().get_text_bank(textbank_id)
+
+        out_file = filedialog.asksaveasfilename(
+            title="Export TextBank JSON",
+            initialfile=f"{textbank_id}.json",
+            defaultextension=".json",
+            filetypes=[("JSON", "*.json")]
+        )
+        if not out_file:
+            return
+
+        tb.export_json(out_file)
+        self.check_modified()
+        tkinter.messagebox.showinfo("Export complete", f"Exported TextBank {textbank_id} to:\n{out_file}")
+
+
+    def import_textbank_json(self, textbank_id: int):
+        tb = self.mod_handler.get_active_mod().get_text_bank(textbank_id)
+
+        in_file = filedialog.askopenfilename(
+            title="Import TextBank JSON",
+            filetypes=[("JSON", "*.json")]
+        )
+        if not in_file:
+            return
+
+        replaced = tb.import_json(in_file)
+        self.check_modified()
+        tkinter.messagebox.showinfo(
+            "Import complete",
+            f"Imported into TextBank {textbank_id}\nReplaced strings: {replaced}"
+        )
+
+
+    def export_all_textbanks_json(self):
+        out_dir = filedialog.askdirectory(title="Export ALL TextBanks JSON to folder")
+        if not out_dir:
+            return
+
+        folder, count = self.mod_handler.get_active_mod().export_all_textbanks_json(out_dir)
+        self.check_modified()
+        tkinter.messagebox.showinfo(
+            "Export complete",
+            f"Exported {count} TextBanks to:\n{folder}"
+        )
+
+
+    def import_all_textbanks_json(self):
+        in_dir = filedialog.askdirectory(title="Import ALL TextBanks JSON from folder")
+        if not in_dir:
+            return
+
+        banks_processed, total_replaced, missing_banks = self.mod_handler.get_active_mod().import_all_textbanks_json(in_dir)
+        self.check_modified()
+        tkinter.messagebox.showinfo(
+            "Import complete",
+            f"Banks processed: {banks_processed}\n"
+            f"Strings replaced: {total_replaced}\n"
+            f"JSON files with missing bank: {missing_banks}"
+        )
+    #end updated by pito
+
     def reload_watched_paths(self):
         for p in self.watched_paths:
             self.observer.unschedule(p)
@@ -2726,6 +2910,15 @@ class MainWindow:
             selects = self.treeview.selection()
             is_single = len(selects) == 1
 
+            #updates by pito
+            item_type = ""
+            tags = ()
+            if is_single:
+                item = selects[0]
+                item_type = self.treeview.item(item, option="values")[0]
+                tags = self.treeview.item(item, option="tags")
+            #end updates by pito
+
             all_audio = True
             for select in selects:
                 values = self.treeview.item(select, option="values")
@@ -2763,7 +2956,25 @@ class MainWindow:
                         command=lambda: self.play_video(
                             int(self.treeview.item(self.treeview.selection()[0], option="tags")[0]))
                     )
+            #updated by pito
+            # BEFORE you use item_type/tags, define them for the selected row:
+            select_item = selects[0]
+            item_type = self.treeview.item(select_item, option="values")[0]
+            tags = self.treeview.item(select_item, option="tags")
 
+            if is_single and item_type == "Text Bank":
+                textbank_id = int(tags[0])
+
+                self.right_click_menu.add_command(
+                    label="Export TextBank (JSON)",
+                    command=lambda tb_id=textbank_id: self.export_textbank_json(tb_id)
+                )
+                self.right_click_menu.add_command(
+                    label="Import TextBank (JSON)",
+                    command=lambda tb_id=textbank_id: self.import_textbank_json(tb_id)
+                )
+
+            #end updated by pito
             if all_audio:
                 self.right_click_menu.add_command(
                     label="Import audio",
@@ -2914,8 +3125,11 @@ class MainWindow:
             self.track_info_panel.frame.pack(side="top", fill="x", padx=8, pady=8)
         elif selection_type == "Sound Bank":
             pass
+        #update by pito
         elif selection_type == "Text Bank":
-            pass
+            pass  # TextBanksWindow already exists; strings are edited via StringEntryWindow
+
+        #update by pito
         elif selection_type == "Random Sequence":
             self.sequence_container_panel.set_container(self.mod_handler.get_active_mod().get_hierarchy_entry(selection_id))
             self.sequence_container_panel.frame.pack(side="top", fill="x", padx=8, pady=8)
@@ -2988,10 +3202,13 @@ class MainWindow:
         if isinstance(entry, GameArchive):
             tree_entry = self.treeview.insert(parent_item, END, tag=entry.name)
         else:
+            #updated by pito
             if isinstance(entry, StringEntry):
                 tree_entry = self.treeview.insert(parent_item, END, tags=(entry.get_id(), entry.parent.get_id()))
             else:
-                tree_entry = self.treeview.insert(parent_item, END, tag=entry.get_id())
+                tree_entry = self.treeview.insert(parent_item, END, tags=(entry.get_id(),))
+            #end updated by pito
+
             if entry.modified or (isinstance(entry, (wwise_hierarchy_154.HircEntry, wwise_hierarchy_140.HircEntry)) and entry.has_modified_children()):
                 self.mark_modified(entry, tree_entry)
         if isinstance(entry, WwiseBank):
